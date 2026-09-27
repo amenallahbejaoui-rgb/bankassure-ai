@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# ML
+ml/models/*
+ml/experiments/*
+*.joblib
+*.pkl
+*.onnx
+
+# Data
+data/raw/*
+data/processed/*
+data/synthetic/*
+*.csv
+*.parquet
+
+# Node
+node_modules/
+.next/
+out/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Docker
+docker-data/
