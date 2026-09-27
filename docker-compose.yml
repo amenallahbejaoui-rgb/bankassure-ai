@@ -1,0 +1,48 @@
+services:
+
+  postgres:
+    image: postgres:17
+    container_name: bankassure-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bankassure
+      POSTGRES_USER: bankassure
+      POSTGRES_PASSWORD: bankassure_dev
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bankassure -d bankassure"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: bankassure-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+
+  neo4j:
+    image: neo4j:5
+    container_name: bankassure-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/bankassure_dev
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+
+volumes:
+  postgres_data:
+  redis_data:
+  neo4j_data:
+  neo4j_logs:
