@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.customers import router as customers_router
 from app.db.postgres import check_postgres, create_tables
 from app.models.customer import Customer
 
@@ -18,6 +19,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+app.include_router(customers_router)
 
 
 @app.get("/health")
