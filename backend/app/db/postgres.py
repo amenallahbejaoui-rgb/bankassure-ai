@@ -1,6 +1,7 @@
 from sqlalchemy import create_engine, text
 
 from app.core.config import settings
+from app.db.base import Base
 
 
 DATABASE_URL = (
@@ -21,3 +22,7 @@ def check_postgres() -> bool:
         connection.execute(text("SELECT 1"))
 
     return True
+
+
+def create_tables() -> None:
+    Base.metadata.create_all(bind=engine)
