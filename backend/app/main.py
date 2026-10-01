@@ -1,11 +1,11 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-
+from app.api.accounts import router as accounts_router
 from app.api.customers import router as customers_router
 from app.db.postgres import check_postgres, create_tables
 from app.models.customer import Customer
-
+from app.api.transactions import router as transactions_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -21,7 +21,8 @@ app = FastAPI(
 )
 
 app.include_router(customers_router)
-
+app.include_router(accounts_router)
+app.include_router(transactions_router)
 
 @app.get("/health")
 def health_check():

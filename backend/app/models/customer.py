@@ -1,8 +1,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, String
-from sqlalchemy.orm import Mapped, mapped_column
-
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
@@ -58,4 +57,10 @@ class Customer(Base):
         DateTime,
         default=datetime.utcnow,
         nullable=False,
+        
+    )
+    accounts = relationship(
+        "Account",
+        back_populates="customer",
+        cascade="all, delete-orphan",
     )
