@@ -1,7 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String, Text, Float
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -86,10 +87,20 @@ class Transaction(Base):
         nullable=False,
     )
 
-    status: Mapped[str] = mapped_column(
+    # --- Model 1 — Fraud Detection scoring columns (server-populated) ---
+    fraud_score: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
+    fraud_decision: Mapped[str | None] = mapped_column(
         String(20),
-        default="completed",
-        nullable=False,
+        nullable=True,
+    )
+
+    fraud_reasons: Mapped[list[str] | None] = mapped_column(
+        JSONB().with_variant(Text(), "sqlite"),
+        nullable=True,
     )
 
     account = relationship(
