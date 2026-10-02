@@ -175,26 +175,23 @@ def random_transaction_time():
         seconds=random.randint(0, seconds)
     )
 
-
-def random_amount(transaction_type, is_fraud):
+def random_amount(transaction_type):
     if transaction_type == "cash_withdrawal":
         low = 20
         high = 1000
+
     elif transaction_type == "transfer":
         low = 50
         high = 5000
+
     else:
         low = 5
         high = 1500
 
-    amount = random.uniform(low, high)
-
-    # Fraudulent transactions are more likely
-    # to have unusually large amounts.
-    if is_fraud:
-        amount *= random.uniform(1.5, 4.0)
-
-    return round(amount, 2)
+    return round(
+        random.uniform(low, high),
+        2,
+    )
 
 
 def random_country():
@@ -209,13 +206,10 @@ def random_country():
             if country != "Tunisia"
         ]
     )
-
-
 def calculate_merchant_risk(
     category,
     country,
     is_international,
-    is_fraud,
 ):
     risk = {
         "grocery": 5,
@@ -229,15 +223,21 @@ def calculate_merchant_risk(
     if is_international:
         risk += random.uniform(10, 25)
 
-    if country not in ["Tunisia", "France", "Italy"]:
+    if country not in [
+        "Tunisia",
+        "France",
+        "Italy",
+    ]:
         risk += random.uniform(5, 20)
 
-    if is_fraud:
-        risk += random.uniform(20, 40)
+    # Natural merchant variability.
+    # This is NOT based on the fraud label.
+    risk += random.uniform(-3, 8)
 
-    return round(min(risk, 99.99), 2)
-
-
+    return round(
+        max(1, min(risk, 99.99)),
+        2,
+    )
 def should_be_fraud(
     is_international,
     merchant_category,
@@ -245,41 +245,111 @@ def should_be_fraud(
     merchant_risk,
     timestamp,
 ):
+    """
+    Generate fraud labels using a probabilistic behavioral model.
+
+    The goal is to create overlap between legitimate and fraudulent
+    transactions instead of making fraud directly separable by one feature.
+    """
+
     score = 0.0
 
+    # --------------------------------------------------
+    # Base probability
+    # --------------------------------------------------
+
+    score += 0.08
+
+    # --------------------------------------------------
+    # Transaction context
+    # --------------------------------------------------
+
     if is_international:
-        score += 0.12
+        score += 0.04
 
     if merchant_category in [
         "electronics",
         "shopping",
         "travel",
     ]:
-        score += 0.08
+        score += 0.04
 
-    if amount > 2000:
-        score += 0.15
+    # --------------------------------------------------
+    # Transaction amount
+    # --------------------------------------------------
 
-    if amount > 5000:
-        score += 0.15
+    if amount > 1500:
+        score += 0.04
 
-    if merchant_risk > 50:
-        score += 0.20
+    if amount > 3000:
+        score += 0.05
 
-    # Unusual night activity
+    if amount > 7000:
+        score += 0.05
+
+    # --------------------------------------------------
+    # Merchant risk
+    #
+    # Keep the effect moderate so it isn't the
+    # dominant fraud predictor.
+    # --------------------------------------------------
+
+    if merchant_risk > 40:
+        score += 0.03
+
+    if merchant_risk > 70:
+        score += 0.04
+
+    # --------------------------------------------------
+    # Night activity
+    # --------------------------------------------------
+
     if timestamp.hour < 5 or timestamp.hour >= 23:
-        score += 0.12
+        score += 0.05
 
-    # Base fraud probability
-    score += 0.025
+    # --------------------------------------------------
+    # Interaction effects
+    #
+    # Fraud becomes more likely when several suspicious
+    # conditions happen together.
+    # --------------------------------------------------
 
-    return random.random() < min(score, 0.75)
+    suspicious_signals = 0
 
+    if is_international:
+        suspicious_signals += 1
 
-# ============================================================
-# RESET DATABASE
-# ============================================================
+    if amount > 3000:
+        suspicious_signals += 1
 
+    if merchant_risk > 60:
+        suspicious_signals += 1
+
+    if timestamp.hour < 5 or timestamp.hour >= 23:
+        suspicious_signals += 1
+
+    if merchant_category in [
+        "electronics",
+        "shopping",
+        "travel",
+    ]:
+        suspicious_signals += 1
+
+    if suspicious_signals >= 3:
+        score += 0.10
+
+    # --------------------------------------------------
+    # Randomness
+    #
+    # Some fraudulent transactions will look normal,
+    # and some normal transactions will look suspicious.
+    # --------------------------------------------------
+
+    score += random.uniform(-0.025, 0.025)
+
+    score = max(0.01, min(score, 0.50))
+
+    return random.random() < score
 def reset_database():
     print("Resetting database...")
 
@@ -432,19 +502,20 @@ def generate_transactions(accounts):
             MERCHANTS[merchant_category]
         )
 
-        # Temporary risk estimate before fraud label.
+        # Generate transaction characteristics independently
+        # of the future fraud label.
         merchant_risk = calculate_merchant_risk(
             merchant_category,
             country,
             is_international,
-            False,
         )
 
         amount = random_amount(
             transaction_type,
-            False,
         )
 
+        # Determine fraud only after the transaction
+        # characteristics have been generated.
         is_fraud = should_be_fraud(
             is_international,
             merchant_category,
@@ -455,20 +526,6 @@ def generate_transactions(accounts):
 
         if is_fraud:
             fraud_count += 1
-
-            # Fraud transactions receive stronger
-            # suspicious characteristics.
-            amount = random_amount(
-                transaction_type,
-                True,
-            )
-
-            merchant_risk = calculate_merchant_risk(
-                merchant_category,
-                country,
-                is_international,
-                True,
-            )
 
         transactions.append(
             {
