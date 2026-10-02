@@ -1,0 +1,6 @@
+{
+  "calibration_q_normal": -0.0008064034095575207,
+  "calibration_q_anomaly": -0.1281287477454253,
+  "val_roc_auc": 0.41790173238279216,
+  "val_pr_auc": 0.11233302847456392
+}
