@@ -5,7 +5,6 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import (
     average_precision_score,
@@ -19,6 +18,7 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
+from xgboost import XGBClassifier
 
 
 # --------------------------------------------------
@@ -55,7 +55,7 @@ DROP_COLUMNS = [
 ]
 
 X = df.drop(columns=DROP_COLUMNS)
-y = df[TARGET]
+y = df[TARGET].astype(int)
 
 
 categorical_features = [
@@ -103,7 +103,17 @@ print(f"Test:       {len(X_test)}")
 
 
 # ============================================================
-# 5. Preprocessing
+# 5. Imbalance ratio for scale_pos_weight
+# ============================================================
+
+neg = (y_train == 0).sum()
+pos = (y_train == 1).sum()
+scale_pos_weight = float(neg / pos)
+print(f"\nClass imbalance (neg/pos): {neg} / {pos} = {scale_pos_weight:.2f}")
+
+
+# ============================================================
+# 6. Preprocessing
 # ============================================================
 
 numeric_pipeline = Pipeline(
@@ -125,6 +135,7 @@ categorical_pipeline = Pipeline(
             "onehot",
             OneHotEncoder(
                 handle_unknown="ignore",
+                sparse_output=False,
             ),
         ),
     ]
@@ -147,71 +158,70 @@ preprocessor = ColumnTransformer(
 
 
 # ============================================================
-# 6. Random Forest (tuned hyperparameters)
+# 7. XGBoost Classifier
 # ============================================================
 
-model = RandomForestClassifier(
+model = XGBClassifier(
     n_estimators=500,
-    max_depth=None,
-    min_samples_split=2,
-    min_samples_leaf=1,
-    max_features="sqrt",
-    bootstrap=True,
-    class_weight="balanced_subsample",
+    max_depth=6,
+    learning_rate=0.05,
+    subsample=0.85,
+    colsample_bytree=0.85,
+    min_child_weight=5,
+    reg_alpha=0.1,
+    reg_lambda=1.0,
+    gamma=0.1,
+    scale_pos_weight=scale_pos_weight,
+    objective="binary:logistic",
+    eval_metric="aucpr",
     random_state=42,
     n_jobs=-1,
-    verbose=1,
+    tree_method="hist",
+    verbosity=1,
 )
 
 pipeline = Pipeline(
     steps=[
-        (
-            "preprocessor",
-            preprocessor,
-        ),
-        (
-            "model",
-            model,
-        ),
+        ("preprocessor", preprocessor),
+        ("model", model),
     ]
 )
 
 
 # ============================================================
-# 7. Train
+# 8. Train
 # ============================================================
 
-print("\nTraining Random Forest...")
+print("\nTraining XGBoost...")
 
 pipeline.fit(
     X_train,
     y_train,
+    model__verbose=True,
 )
 
 
 # ============================================================
-# 8. Threshold tuning on validation set
+# 9. Threshold tuning on validation set
 # ============================================================
 
 def tune_threshold(y_true, probs, mode="f1", target_recall=0.60):
     """Scan decision thresholds; return best threshold and its metrics.
 
     mode:
-      - "f1"           -> maximise F1-score on the positive class
-      - "target_recall" -> lowest threshold where recall >= target_recall
+      - "f1"            -> maximise F1-score on the positive class
+      - "target_recall" -> highest precision where recall >= target_recall
     """
     thresholds = np.linspace(0.05, 0.95, 181)
     best_score = -1.0
     best_threshold = 0.5
     best_row = None
 
-    rows = []
     for t in thresholds:
         preds = (probs >= t).astype(int)
         prec = precision_score(y_true, preds, zero_division=0)
         rec = recall_score(y_true, preds, zero_division=0)
         f1 = f1_score(y_true, preds, zero_division=0)
-        rows.append((t, prec, rec, f1))
 
         if mode == "f1":
             if f1 > best_score:
@@ -220,14 +230,12 @@ def tune_threshold(y_true, probs, mode="f1", target_recall=0.60):
                 best_row = (t, prec, rec, f1)
         elif mode == "target_recall":
             if rec >= target_recall:
-                # among candidates, prefer the one with highest precision
                 candidate_score = prec
                 if candidate_score > best_score:
                     best_score = candidate_score
                     best_threshold = t
                     best_row = (t, prec, rec, f1)
 
-    # Fallback if target_recall unreachable -> fall back to best F1
     if best_row is None:
         return tune_threshold(y_true, probs, mode="f1")
 
@@ -238,7 +246,6 @@ val_probabilities = pipeline.predict_proba(X_val)[:, 1]
 
 print("\n===== THRESHOLD TUNING (validation set) =====")
 
-# A) Best F1 threshold
 best_f1_thr, (t_f1, p_f1, r_f1, f1_f1) = tune_threshold(
     y_val, val_probabilities, mode="f1"
 )
@@ -247,7 +254,6 @@ print(
     f"precision={p_f1:.4f}  recall={r_f1:.4f}  f1={f1_f1:.4f}"
 )
 
-# B) Best precision while recall >= 50%
 best_r50_thr, (t_r50, p_r50, r_r50, f1_r50) = tune_threshold(
     y_val, val_probabilities, mode="target_recall", target_recall=0.50
 )
@@ -256,7 +262,6 @@ print(
     f"precision={p_r50:.4f}  recall={r_r50:.4f}  f1={f1_r50:.4f}"
 )
 
-# C) Best precision while recall >= 60%
 best_r60_thr, (t_r60, p_r60, r_r60, f1_r60) = tune_threshold(
     y_val, val_probabilities, mode="target_recall", target_recall=0.60
 )
@@ -265,7 +270,6 @@ print(
     f"precision={p_r60:.4f}  recall={r_r60:.4f}  f1={f1_r60:.4f}"
 )
 
-# Use best F1 threshold as the production default
 DEFAULT_THRESHOLD = float(best_f1_thr)
 print(f"\nDefault threshold (best F1): {DEFAULT_THRESHOLD:.3f}")
 
@@ -282,14 +286,14 @@ def evaluate_threshold(name, y_true, probs, threshold):
 
 
 # ============================================================
-# 9. Validation evaluation (default threshold)
+# 10. Validation evaluation
 # ============================================================
 
 evaluate_threshold("VALIDATION RESULTS", y_val, val_probabilities, DEFAULT_THRESHOLD)
 
 
 # ============================================================
-# 10. Test evaluation
+# 11. Test evaluation
 # ============================================================
 
 test_probabilities = pipeline.predict_proba(X_test)[:, 1]
@@ -299,11 +303,11 @@ test_predictions = evaluate_threshold(
 
 
 # ============================================================
-# 11. Save model + threshold metadata
+# 12. Save model + threshold metadata
 # ============================================================
 
-model_path = MODEL_DIR / "fraud_random_forest.joblib"
-metadata_path = MODEL_DIR / "fraud_random_forest_metadata.json"
+model_path = MODEL_DIR / "fraud_xgboost.joblib"
+metadata_path = MODEL_DIR / "fraud_xgboost_metadata.json"
 
 joblib.dump(pipeline, model_path)
 
@@ -312,6 +316,7 @@ metadata = {
     "threshold_best_f1": float(t_f1),
     "threshold_recall_0_50": float(t_r50),
     "threshold_recall_0_60": float(t_r60),
+    "scale_pos_weight": scale_pos_weight,
     "validation_best_f1": {
         "precision": float(p_f1),
         "recall": float(r_f1),
